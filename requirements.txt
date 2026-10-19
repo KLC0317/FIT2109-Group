@@ -1,0 +1,18 @@
+# Python 3.12. The checker itself uses only the standard library.
+# pytest runs our tests; pylint is used only by the evaluation harness as the
+# existing-tool reference. Transitive dependencies are pinned below.
+pytest==8.2.0
+pylint==4.1.2
+
+# transitive (pip freeze, Python 3.12)
+astroid==4.3.4
+colorama==0.4.6 ; sys_platform == "win32"
+dill==0.4.1
+iniconfig==2.3.1
+isort==9.0.2
+mccabe==0.7.0
+mypy_extensions==1.1.0
+packaging==26.3
+platformdirs==4.13.5
+pluggy==1.7.0
+tomlkit==0.15.2

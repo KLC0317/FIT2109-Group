@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Project-local virtual environment (scripts/setup.sh)
+.venv/
+
+# Everything the tools generate stays under out/ and is rebuilt on demand:
+# scenario repositories, checker reports, logs, temporary merge directories,
+# evaluation results and timing CSVs.
+out/
