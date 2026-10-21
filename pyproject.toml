@@ -1,0 +1,13 @@
+[project]
+name = "silent-merge-check"
+version = "1.0.0"
+description = "Pre-merge check for silent breaks between two Python branches"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: runs the Bash checker against real Git repositories",
+]
