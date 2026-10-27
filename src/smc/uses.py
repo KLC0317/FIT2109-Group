@@ -27,13 +27,14 @@ class Use:
     path: str
     lineno: int
     scope: str  # "<module>", "badge_line", "Report.render", ...
-    text: str  # source text shown in diagnostics
+    text: str  # callee or import statement text; part of the key
     chain: tuple[str, ...] = ()  # call: callee name chain
     shape: CallShape | None = None  # call: explicit arguments
     shadowed: bool = False  # call: first name bound in an enclosing local scope
     target: str | None = None  # imports: absolute module
     name: str | None = None  # import_from: imported name
     problem: str | None = None  # e.g. unresolvable relative import
+    source: str = ""  # call: the whole call expression, shown in diagnostics
     key: tuple = field(default=(), compare=False)
 
 
@@ -243,6 +244,7 @@ class UseCollector(ast.NodeVisitor):
                     chain=chain,
                     shape=CallShape.from_call(node),
                     shadowed=self.is_shadowed(chain[0]),
+                    source=_clip(ast.unparse(node)),
                 )
             )
         self.generic_visit(node)
@@ -281,6 +283,10 @@ class UseCollector(ast.NodeVisitor):
                     problem=None if target else "relative import beyond the top-level package",
                 )
             )
+
+
+def _clip(text: str, limit: int = 120) -> str:
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 def _with_key(use: Use, key: tuple) -> Use:
