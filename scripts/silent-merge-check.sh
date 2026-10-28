@@ -30,11 +30,10 @@ usage() {
     sed -n '2,9s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
 }
 
-repo='' source_root='.' out_dir="$ROOT/out" report='' keep_temp=0 quiet=0
+repo='' source_root='.' out_dir="$ROOT/out" report='' log_file='' keep_temp=0 quiet=0
 refs=()
 need_value() { # <option> <remaining-arg-count>
-    (( $2 >= 2 )) || { printf 'error: %s needs a value
-' "$1" >&2; exit $EXIT_ERROR; }
+    (( $2 >= 2 )) || { printf 'error: %s needs a value\n' "$1" >&2; exit $EXIT_ERROR; }
 }
 while (( $# > 0 )); do
     case "$1" in
@@ -42,6 +41,7 @@ while (( $# > 0 )); do
         --source-root) need_value "$1" $#; source_root=$2; shift 2 ;;
         --out-dir) need_value "$1" $#; out_dir=$2; shift 2 ;;
         --json) need_value "$1" $#; report=$2; shift 2 ;;
+        --log) need_value "$1" $#; log_file=$2; shift 2 ;;
         --keep-temp) keep_temp=1; shift ;;
         --quiet) quiet=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -55,6 +55,43 @@ run_id="$(date +%Y%m%dT%H%M%S)-$$"
 mkdir -p "$out_dir/reports"
 out_dir=$(cd "$out_dir" && pwd -P)
 [[ -n "$report" ]] || report="$out_dir/reports/$run_id.json"
+[[ -n "$log_file" ]] || log_file="$out_dir/logs/$run_id.jsonl"
+mkdir -p "$(dirname "$log_file")"
+
+# --- structured log and stage timing ----------------------------------------------
+now_ms() {
+    if [[ -n "${EPOCHREALTIME:-}" ]]; then
+        local t=${EPOCHREALTIME/[.,]/}
+        printf '%s\n' $(( 10#$t / 1000 ))
+    else
+        printf '%s\n' $(( $(date +%s%N) / 1000000 ))
+    fi
+}
+
+# log_event <event> [extra JSON members]: append one JSON line to the run log.
+log_event() {
+    printf '{"ts": "%s", "run_id": "%s", "component": "orchestrator", "event": %s%s}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" "$run_id" "$(json_str "$1")" "${2:+, $2}" >> "$log_file"
+}
+
+run_t0=$(now_ms) stage_t0=0 stage_name=''
+# stage <name>: log the running stage's duration, then start <name>.
+stage() {
+    local now
+    now=$(now_ms)
+    if [[ -n "$stage_name" ]]; then
+        log_event stage "\"stage\": \"$stage_name\", \"duration_ms\": $(( now - stage_t0 ))"
+    fi
+    stage_name=$1 stage_t0=$now
+}
+
+log_result() { # <status> <exit-code>
+    stage ''
+    log_event result "\"status\": \"$1\", \"exit_code\": $2, \"total_ms\": $(( $(now_ms) - run_t0 )), \"report\": $(json_str "$(native_path "$report")")"
+}
+
+log_event start "\"refs\": [$(json_str "${refs[0]-}"), $(json_str "${refs[1]-}")], \"repo\": $(json_str "$repo"), \"source_root\": $(json_str "$source_root")"
+stage validate
 
 notes=()
 commit_base='' commit_a='' commit_b=''
@@ -79,6 +116,8 @@ finish() {
   "notes": [$note_json]
 }
 JSON
+    log_event error "\"message\": $(json_str "$message")"
+    log_result "$status" $EXIT_ERROR
     if (( quiet == 0 )); then
         printf 'silent-merge-check: %s\n' "$status"
     fi
@@ -107,6 +146,7 @@ if [[ "$(git -C "$repo" rev-parse --is-bare-repository)" == false ]]; then
     fi
 fi
 
+stage merge_base
 mapfile -t bases < <(git -C "$repo" merge-base --all "$commit_a" "$commit_b" || true)
 case ${#bases[@]} in
     0) finish ERROR "'${refs[0]}' and '${refs[1]}' have no common ancestor" ;;
@@ -115,6 +155,7 @@ case ${#bases[@]} in
 esac
 
 # --- unsupported repository features -----------------------------------------
+stage preflight
 for commit in "$commit_base" "$commit_a" "$commit_b"; do
     if git -C "$repo" ls-tree -r --format='%(objectmode)' "$commit" | grep -qx 160000; then
         finish INCONCLUSIVE "submodules are out of scope (found in ${commit:0:12})"
@@ -139,6 +180,7 @@ if [[ "$source_root" != . ]]; then
 fi
 
 # --- isolated work directory ----------------------------------------------------
+stage workdir
 tmp_base="$out_dir/tmp"
 work=$(smc_make_workdir "$tmp_base") || finish ERROR "cannot create a work directory under $tmp_base"
 cleanup() {
@@ -167,6 +209,7 @@ tgit() {
 }
 
 # --- merge ----------------------------------------------------------------------
+stage merge
 tgit checkout -q --detach "$commit_a"
 set +e
 tgit merge -q --no-commit --no-ff --no-edit "$commit_b" >"$work/merge.out" 2>&1
@@ -207,6 +250,7 @@ state_json() { # <label>
 }
 
 states=''
+stage export
 if [[ "$merge_result" == clean ]]; then
     export_state base "$commit_base"
     export_state a "$commit_a"
@@ -231,10 +275,12 @@ cat > "$manifest" <<JSON
   "merge": {"result": "$merge_result", "conflicts_file": $(json_str "$(native_path "$conflicts_file")")},
   "states": {$states},
   "notes": [$note_json],
-  "report": $(json_str "$(native_path "$report")")
+  "report": $(json_str "$(native_path "$report")"),
+  "log": $(json_str "$(native_path "$log_file")")
 }
 JSON
 
+stage analyse
 quiet_flag=()
 (( quiet == 0 )) || quiet_flag=(--quiet)
 set +e
@@ -252,7 +298,9 @@ esac
 if (( exit_code == EXIT_ERROR )) && [[ ! -s "$report" ]]; then
     finish ERROR "analyser failed (exit $status)"
 fi
+result=$(grep -m 1 -o '"status": "[A-Z_]*"' "$report" | cut -d'"' -f4)
+log_result "${result:-ERROR}" $exit_code
 if (( quiet == 0 )); then
-    printf 'report: %s\n' "${report#"$ROOT"/}"
+    printf 'report: %s\nlog:    %s\n' "${report#"$ROOT"/}" "${log_file#"$ROOT"/}"
 fi
 exit $exit_code
