@@ -51,6 +51,25 @@ while (( $# > 0 )); do
     esac
 done
 
+# Generated files must never land in the user's working tree: refuse output
+# paths inside it unless the repository ignores them.
+if [[ -n "$repo" && -d "$repo" ]] &&
+   [[ "$(git -C "$repo" rev-parse --is-inside-work-tree 2>/dev/null)" == true ]]; then
+    toplevel=$(cd "$(git -C "$repo" rev-parse --show-toplevel)" && pwd -P)
+    for target in "$out_dir" "$report" "$log_file"; do
+        [[ -n "$target" ]] || continue
+        resolved=$(realpath -m -- "$target")
+        probe=$resolved
+        [[ "$target" != "$out_dir" ]] || probe+=/  # directory-only ignore patterns
+        if [[ "$resolved" == "$toplevel" || "$resolved" == "$toplevel"/* ]] &&
+           ! git -C "$repo" check-ignore -q --no-index -- "$probe" 2>/dev/null; then
+            printf 'error: %s is inside the working tree of %s; choose an --out-dir/--json/--log outside it\n' \
+                "$target" "$repo" >&2
+            exit $EXIT_ERROR
+        fi
+    done
+fi
+
 run_id="$(date +%Y%m%dT%H%M%S)-$$"
 mkdir -p "$out_dir/reports"
 out_dir=$(cd "$out_dir" && pwd -P)
