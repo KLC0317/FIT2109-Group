@@ -35,7 +35,7 @@ native_path() {
 # Copy a directory's contents, skipping caches.
 copy_tree() { # <src> <dest>
     mkdir -p "$2"
-    tar -C "$1" --exclude=__pycache__ --exclude='*.pyc' -cf - . | tar -C "$2" -xf -
+    tar -C "$1" --exclude=__pycache__ --exclude='*.pyc' -cf - . | tar -C "$2" -xmf -
 }
 
 # Quote a string as a JSON string literal.
