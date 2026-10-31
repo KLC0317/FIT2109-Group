@@ -131,11 +131,21 @@ def bind(signature: Signature, shape: CallShape) -> list[str]:
     filled: set[str] = set(positional[: shape.n_positional])
 
     if shape.n_positional > len(positional) and signature.vararg is None:
+        # Same wording as CPython's too_many_positional().
         given = shape.n_positional
         takes = len(positional)
+        if signature.n_defaults:
+            sig, plural = f"from {takes - signature.n_defaults} to {takes}", True
+        else:
+            sig, plural = str(takes), takes != 1
+        kwonly_given = sum(1 for k in shape.keywords if k in signature.kwonly)
+        kwonly_sig = ""
+        if kwonly_given:
+            kwonly_sig = (f" positional argument{'s' if given != 1 else ''} (and {kwonly_given} "
+                          f"keyword-only argument{'s' if kwonly_given != 1 else ''})")
+        verb = "was" if given == 1 and not kwonly_given else "were"
         problems.append(
-            f"takes {_plural(takes, 'positional argument')} but {given} "
-            f"{'was' if given == 1 else 'were'} given"
+            f"takes {sig} positional argument{'s' if plural else ''} but {given}{kwonly_sig} {verb} given"
         )
 
     posonly_as_keyword = []
