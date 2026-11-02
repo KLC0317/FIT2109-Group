@@ -95,8 +95,8 @@ def resolve_relative(package: str, level: int, module: str | None) -> str | None
     if level == 0:
         return module
     parts = package.split(".") if package else []
-    if level - 1 > len(parts) or (level - 1 == len(parts) and not module):
-        return None
+    if level - 1 >= len(parts):
+        return None  # no parent package, or beyond the top-level package
     base = parts[: len(parts) - (level - 1)]
     if module:
         base.append(module)
@@ -227,6 +227,7 @@ def index_module(module: ParsedModule) -> ModuleIndex:
     if module.tree is not None:
         _ModuleBinder(index).walk(module.tree.body, conditional=False)
         _scan_whole_module(index, module.tree)
+        index.dynamic_imports.sort(key=lambda d: d.lineno)
     return index
 
 
