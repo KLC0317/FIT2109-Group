@@ -17,7 +17,7 @@ current() {
         cd "$ROOT"
         grep -l '^SPLIT=holdout' scenario/cases/*/case.env | xargs -n1 dirname |
             xargs -I{} find {} -type f -not -path '*/__pycache__/*' -print0 |
-            LC_ALL=C sort -z | xargs -0 sha256sum
+            LC_ALL=C sort -z | xargs -0 sha256sum | sed 's|^\([0-9a-f]*\) [ *]|\1  |'
     )
 }
 
