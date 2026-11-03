@@ -82,9 +82,44 @@ findings a reviewer must triage.
 | c29 | conflict | | changes `roster_line` format | changes it differently | | |
 | c30 | conflict | | required `include_email` | default `include_email=True` on the same line | | |
 
+## Fixture format
+
+```
+scenario/cases/<id>/
+  case.env        ID, LABEL, RULE, SPLIT, BRANCH_A, BRANCH_B, TESTS_COVER,
+                  BASE_DEFECT, EXPECT_FILE, EXPECT_CALLER, DESCRIPTION
+  a/, b/          files each branch writes (full contents)
+  a.delete        paths branch A deletes (optional; likewise b.delete)
+  smoke.py        ground-truth assertion, run on a tree with that tree as cwd
+scenario/shared/legacy.py   pre-existing defect copied in when BASE_DEFECT=yes
+scenario/holdout.lock       sha256 of every holdout file at freeze time
+```
+
+`bash scripts/make-fixtures.sh` rebuilds every repository under
+`out/scenarios/` with fixed identities and dates, so commit IDs are the same
+on every machine and nothing in the archive depends on nested `.git`
+folders. `out/scenarios/miniapp` holds the three Appendix C2 pairs
+(`r1-remove-function`/`r1-old-caller`, `r2-api-change`/`r2-new-caller`,
+`r3-delete-module`/`r3-old-import`) in one repository.
+
 ## Labelling protocol
 
 M3 writes each fixture, its label and a smoke assertion that exercises the
 new caller. M1 reviews labels against actual Python behaviour before M2 sees
 any holdout result. Smoke assertions are the ground truth; neither the
 checker nor the baseline may read them.
+
+For each pair the review runs, in a scratch clone: the existing tests on A
+and on B, the smoke assertion on the caller branch, a trial merge
+(`git merge --no-commit --no-ff`), then the smoke assertion and the tests on
+the merged tree. A `break` label needs both branches green, a clean merge and
+a failing smoke assertion after the merge; `safe` needs the smoke assertion
+to pass after the merge; `conflict` needs unmerged entries.
+
+### Label review log
+
+| Date | Set | Reviewer | Outcome |
+|---|---|---|---|
+| 2026-10-29 | development (12) | M1 | all labels confirmed |
+| 2026-11-03 | holdout (18) | M1 | 3 fixtures fixed before freeze: c18 (A's roster test not updated), c27 (A's copy of textfmt.py made Git treat the delete as a rename, so no conflict), c29 (roster tests not updated on either side) |
+| 2026-11-03 | holdout (18) | M1 | all labels confirmed; holdout frozen in `scenario/holdout.lock` |
