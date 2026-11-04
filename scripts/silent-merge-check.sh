@@ -65,7 +65,7 @@ if [[ -n "$repo" && -d "$repo" ]] &&
     toplevel=$(cd "$(git -C "$repo" rev-parse --show-toplevel)" && pwd -P)
     for target in "$out_dir" "$report" "$log_file"; do
         [[ -n "$target" ]] || continue
-        resolved=$(realpath -m -- "$target")
+        resolved=$(realpath -m -- "$(shell_path "$target")")
         probe=$resolved
         [[ "$target" != "$out_dir" ]] || probe+=/  # directory-only ignore patterns
         if [[ "$resolved" == "$toplevel" || "$resolved" == "$toplevel"/* ]] &&
