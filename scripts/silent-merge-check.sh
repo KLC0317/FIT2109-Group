@@ -12,9 +12,16 @@
 # written: the merge happens in a temporary repository under <out-dir>/tmp
 # that borrows the user's objects read-only, with hooks and the user's
 # global/system Git configuration switched off. Project code is never run.
-set -euo pipefail
+set -Eeuo pipefail
 
 readonly EXIT_SAFE=0 EXIT_BREAK=1 EXIT_CONFLICT=2 EXIT_ERROR=3
+
+# Exit codes 1 and 2 are results. An unplanned exit (set -e stopping on a
+# failed command) must never be mistaken for one, so every deliberate exit
+# goes through leave() and the EXIT trap turns anything else into ERROR.
+deliberate=0 failed_at=''
+leave() { deliberate=1; exit "$1"; }
+trap 'failed_at="line $LINENO: $BASH_COMMAND"' ERR
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=scripts/lib/common.sh
@@ -33,7 +40,7 @@ usage() {
 repo='' source_root='.' out_dir="$ROOT/out" report='' log_file='' keep_temp=0 quiet=0
 refs=()
 need_value() { # <option> <remaining-arg-count>
-    (( $2 >= 2 )) || { printf 'error: %s needs a value\n' "$1" >&2; exit $EXIT_ERROR; }
+    (( $2 >= 2 )) || { printf 'error: %s needs a value\n' "$1" >&2; leave $EXIT_ERROR; }
 }
 while (( $# > 0 )); do
     case "$1" in
@@ -44,9 +51,9 @@ while (( $# > 0 )); do
         --log) need_value "$1" $#; log_file=$2; shift 2 ;;
         --keep-temp) keep_temp=1; shift ;;
         --quiet) quiet=1; shift ;;
-        -h|--help) usage; exit 0 ;;
+        -h|--help) usage; leave 0 ;;
         --) shift; refs+=("$@"); break ;;
-        -*) usage >&2; printf 'error: unknown option: %s\n' "$1" >&2; exit $EXIT_ERROR ;;
+        -*) usage >&2; printf 'error: unknown option: %s\n' "$1" >&2; leave $EXIT_ERROR ;;
         *) refs+=("$1"); shift ;;
     esac
 done
@@ -65,7 +72,7 @@ if [[ -n "$repo" && -d "$repo" ]] &&
            ! git -C "$repo" check-ignore -q --no-index -- "$probe" 2>/dev/null; then
             printf 'error: %s is inside the working tree of %s; choose an --out-dir/--json/--log outside it\n' \
                 "$target" "$repo" >&2
-            exit $EXIT_ERROR
+            leave $EXIT_ERROR
         fi
     done
 fi
@@ -141,8 +148,33 @@ JSON
         printf 'silent-merge-check: %s\n' "$status"
     fi
     printf 'error: %s\n' "$message" >&2
-    exit $EXIT_ERROR
+    leave $EXIT_ERROR
 }
+
+work='' tmp_base="$out_dir/tmp"
+cleanup() {
+    [[ -n "$work" ]] || return 0
+    if (( keep_temp == 0 )); then
+        smc_remove_workdir "$work" "$tmp_base" || true
+    else
+        printf 'kept work directory: %s\n' "$work" >&2
+    fi
+}
+
+on_exit() {
+    local status=$?
+    set +e
+    trap - EXIT
+    cleanup
+    if (( deliberate == 0 )); then
+        finish ERROR "unexpected failure (exit $status)${failed_at:+ at $failed_at}"
+        exit $EXIT_ERROR
+    fi
+    exit "$status"
+}
+trap on_exit EXIT
+trap 'deliberate=1; exit 130' INT
+trap 'deliberate=1; exit 143' TERM
 
 # --- validate input ------------------------------------------------------------
 (( ${#refs[@]} == 2 )) || { usage >&2; finish ERROR "expected exactly two branch references"; }
@@ -200,18 +232,7 @@ fi
 
 # --- isolated work directory ----------------------------------------------------
 stage workdir
-tmp_base="$out_dir/tmp"
 work=$(smc_make_workdir "$tmp_base") || finish ERROR "cannot create a work directory under $tmp_base"
-cleanup() {
-    if (( keep_temp == 0 )); then
-        smc_remove_workdir "$work" "$tmp_base" || true
-    else
-        printf 'kept work directory: %s\n' "$work" >&2
-    fi
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 
 objects="$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)/objects"
 mkdir -p "$work/hooks"
@@ -259,7 +280,9 @@ export_state() {
     tgit archive --format=tar "$oid" | tar -x -m -C "$dir"
     : > "$work/snap/$label.files"
     while IFS= read -r -d '' path; do
-        [[ "$path" == *.py ]] && printf '%s\0' "$path" >> "$work/snap/$label.files"
+        if [[ "$path" == *.py ]]; then
+            printf '%s\0' "$path" >> "$work/snap/$label.files"
+        fi
     done < <(tgit ls-tree -r -z --name-only "$oid" "${pathspec[@]}")
 }
 
@@ -302,24 +325,25 @@ JSON
 stage analyse
 quiet_flag=()
 (( quiet == 0 )) || quiet_flag=(--quiet)
+rm -f -- "$report"
 set +e
 PYTHONPATH="$(native_path "$ROOT/src")" PYTHONDONTWRITEBYTECODE=1 \
     "$PY" -m smc analyse --manifest "$(native_path "$manifest")" "${quiet_flag[@]}"
 status=$?
 set -e
 
-case $status in
-    0) exit_code=$EXIT_SAFE ;;
-    1) exit_code=$EXIT_BREAK ;;
-    2) exit_code=$EXIT_CONFLICT ;;
-    *) exit_code=$EXIT_ERROR ;;
+# The report decides the result; the analyser's exit code must agree with it.
+result=$(grep -m 1 -o '"status": "[A-Z_]*"' "$report" 2>/dev/null | cut -d'"' -f4 || true)
+case "$result" in
+    SAFE) exit_code=$EXIT_SAFE ;;
+    SILENT_BREAK) exit_code=$EXIT_BREAK ;;
+    TEXT_CONFLICT) exit_code=$EXIT_CONFLICT ;;
+    INCONCLUSIVE|ERROR) exit_code=$EXIT_ERROR ;;
+    *) finish ERROR "analyser failed (exit $status) without writing a report" ;;
 esac
-if (( exit_code == EXIT_ERROR )) && [[ ! -s "$report" ]]; then
-    finish ERROR "analyser failed (exit $status)"
-fi
-result=$(grep -m 1 -o '"status": "[A-Z_]*"' "$report" | cut -d'"' -f4)
-log_result "${result:-ERROR}" $exit_code
+(( status == exit_code )) || finish ERROR "analyser exit $status does not match its report ($result)"
+log_result "$result" $exit_code
 if (( quiet == 0 )); then
     printf 'report: %s\nlog:    %s\n' "${report#"$ROOT"/}" "${log_file#"$ROOT"/}"
 fi
-exit $exit_code
+leave $exit_code
