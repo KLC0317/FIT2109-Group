@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # Deterministic fixture generator: rebuilds every scenario repository offline.
 #
-# Usage: bash scripts/make-fixtures.sh [--out <dir>] [--split dev|holdout|all] [--list] [case-id ...]
+# Usage: bash scripts/make-fixtures.sh [--out <dir>] [--split dev|holdout|all] [--list]
+#                                      [--latency] [case-id ...]
 #
 # For each scenario/cases/<id>/ it creates <out>/<id>/: a Git repository whose
 # main branch is the MiniApp base commit (plus scenario/shared/legacy.py when
 # BASE_DEFECT=yes) and two branches created from it, BRANCH_A by Developer A
 # and BRANCH_B by Developer B, each applying that side's overlay files and
 # deletions. It also builds <out>/miniapp, the three Appendix C2 pairs (cases
-# c01, c05, c09) in one repository. Fixed identities and commit dates give
-# the same commit IDs on every machine, so the archive needs no nested .git.
+# c01, c05, c09) in one repository. --latency builds only <out>/latency100,
+# the documented 100-file synthetic fixture used for timing. Fixed identities
+# and commit dates give the same commit IDs on every machine, so the archive
+# needs no nested .git.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -22,6 +25,7 @@ SHARED="$ROOT/scenario/shared"
 out="$ROOT/out/scenarios"
 split=all
 list_only=0
+latency=0
 selected=()
 
 while (( $# > 0 )); do
@@ -29,7 +33,8 @@ while (( $# > 0 )); do
         --out) out=${2:?--out needs a directory}; shift 2 ;;
         --split) split=${2:?--split needs dev, holdout or all}; shift 2 ;;
         --list) list_only=1; shift ;;
-        -h|--help) sed -n '2,13s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        --latency) latency=1; shift ;;
+        -h|--help) sed -n '2,16s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"; exit 0 ;;
         -*) die "unknown option: $1" ;;
         *) selected+=("$1"); shift ;;
     esac
@@ -132,10 +137,70 @@ build_miniapp() { # the three Appendix C2 pairs in one repository
     printf 'miniapp: %s\n' "$(fgit "$dest" branch --format='%(refname:short)' | tr '\n' ' ')"
 }
 
+# build_latency: 100 Python files (bigapp/__init__.py + 99 modules). Each
+# module calls into the previous one. A adds a required parameter to
+# bigapp.mod000.f0 and updates its own caller; B adds a call to the old
+# signature in the last module, so the expected result is one R2 finding.
+build_latency() {
+    local dest="$out/latency100" i prev
+    new_repo "$dest"
+    mkdir -p "$dest/bigapp"
+    echo '"""Synthetic 100-file package for latency measurement."""' > "$dest/bigapp/__init__.py"
+    for (( i = 0; i < 99; i++ )); do
+        printf -v prev 'mod%03d' $(( i > 0 ? i - 1 : 0 ))
+        if (( i == 0 )); then
+            imports='' f1_body='return x + y'
+        else
+            imports="from bigapp import $prev as prev" f1_body='return prev.f1(x, y) + 1'
+        fi
+        cat > "$(printf '%s/bigapp/mod%03d.py' "$dest" "$i")" <<PY
+"""Synthetic module $i."""
+$imports
+
+
+def f0(x):
+    return x
+
+
+def f1(x, y=1):
+    $f1_body
+
+
+def f2(x):
+    return f0(x) * 2
+PY
+    done
+    commit_as "$dest" base "2026-10-05T09:00:00+08:00" "bigapp base"
+
+    fgit "$dest" checkout -q -b latency-api main
+    sed -i 's/^def f0(x):$/def f0(x, scale):/; s/return f0(x) \* 2$/return f0(x, 1) * 2/' "$dest/bigapp/mod000.py"
+    commit_as "$dest" a "2026-10-05T10:00:00+08:00" "f0 takes a required scale"
+
+    fgit "$dest" checkout -q -b latency-caller main
+    cat >> "$dest/bigapp/mod098.py" <<'PY'
+
+
+import bigapp.mod000 as first
+
+
+def g(x):
+    return first.f0(x)
+PY
+    commit_as "$dest" b "2026-10-05T11:00:00+08:00" "call f0 from mod098"
+    fgit "$dest" checkout -q main
+    echo "latency100: $(fgit "$dest" ls-files '*.py' | wc -l | tr -d ' ') Python files," \
+        "branches latency-api latency-caller"
+}
+
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 : > "$out/.empty-gitconfig"
 empty_config="$out/.empty-gitconfig"
+
+if (( latency )); then
+    build_latency
+    exit 0
+fi
 
 if (( ${#selected[@]} == 0 )); then
     for dir in "$CASES"/*/; do selected+=("$(basename "$dir")"); done

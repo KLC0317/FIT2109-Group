@@ -85,26 +85,28 @@ out_dir=$(cd "$out_dir" && pwd -P)
 mkdir -p "$(dirname "$log_file")"
 
 # --- structured log and stage timing ----------------------------------------------
+# Timing and timestamps use bash builtins only (EPOCHREALTIME, printf %()T):
+# profiling showed a forked `date` per log line was a measurable share of a run.
+# now_ms <var>: milliseconds since the epoch into <var>.
 now_ms() {
-    if [[ -n "${EPOCHREALTIME:-}" ]]; then
-        local t=${EPOCHREALTIME/[.,]/}
-        printf '%s\n' $(( 10#$t / 1000 ))
-    else
-        printf '%s\n' $(( $(date +%s%N) / 1000000 ))
-    fi
+    local us=${EPOCHREALTIME/[.,]/}
+    printf -v "$1" '%s' $(( 10#$us / 1000 ))
 }
 
 # log_event <event> [extra JSON members]: append one JSON line to the run log.
 log_event() {
-    printf '{"ts": "%s", "run_id": "%s", "component": "orchestrator", "event": %s%s}\n' \
-        "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" "$run_id" "$(json_str "$1")" "${2:+, $2}" >> "$log_file"
+    local us=${EPOCHREALTIME/[.,]/} ts
+    TZ=UTC0 printf -v ts '%(%Y-%m-%dT%H:%M:%S)T' "${us:0:${#us}-6}"
+    printf '{"ts": "%s.%sZ", "run_id": "%s", "component": "orchestrator", "event": "%s"%s}\n' \
+        "$ts" "${us:${#us}-6:3}" "$run_id" "$1" "${2:+, $2}" >> "$log_file"
 }
 
-run_t0=$(now_ms) stage_t0=0 stage_name=''
+now_ms run_t0
+stage_t0=0 stage_name=''
 # stage <name>: log the running stage's duration, then start <name>.
 stage() {
     local now
-    now=$(now_ms)
+    now_ms now
     if [[ -n "$stage_name" ]]; then
         log_event stage "\"stage\": \"$stage_name\", \"duration_ms\": $(( now - stage_t0 ))"
     fi
@@ -112,8 +114,10 @@ stage() {
 }
 
 log_result() { # <status> <exit-code>
+    local now
     stage ''
-    log_event result "\"status\": \"$1\", \"exit_code\": $2, \"total_ms\": $(( $(now_ms) - run_t0 )), \"report\": $(json_str "$(native_path "$report")")"
+    now_ms now
+    log_event result "\"status\": \"$1\", \"exit_code\": $2, \"total_ms\": $(( now - run_t0 )), \"report\": $(json_str "$(native_path "$report")")"
 }
 
 log_event start "\"refs\": [$(json_str "${refs[0]-}"), $(json_str "${refs[1]-}")], \"repo\": $(json_str "$repo"), \"source_root\": $(json_str "$source_root")"
@@ -207,11 +211,18 @@ esac
 
 # --- unsupported repository features -----------------------------------------
 stage preflight
+# One ls-tree pass per commit finds gitlinks (submodules), .gitattributes
+# files and whether the source root exists.
+root_found=0
 for commit in "$commit_base" "$commit_a" "$commit_b"; do
-    if git -C "$repo" ls-tree -r --format='%(objectmode)' "$commit" | grep -qx 160000; then
-        finish INCONCLUSIVE "submodules are out of scope (found in ${commit:0:12})"
-    fi
-    while IFS= read -r -d '' path; do
+    while IFS= read -r -d '' entry; do
+        mode=${entry%% *} path=${entry#* }
+        if [[ "$mode" == 160000 ]]; then
+            finish INCONCLUSIVE "submodules are out of scope (found in ${commit:0:12})"
+        fi
+        if [[ "$source_root" == . || "$path" == "$source_root"/* ]]; then
+            root_found=1
+        fi
         [[ "$path" == .gitattributes || "$path" == */.gitattributes ]] || continue
         drivers=$(git -C "$repo" cat-file blob "$commit:$path" |
             grep -oE '(^|[[:space:]])merge=[^[:space:]]+' | sed 's/.*merge=//' |
@@ -219,16 +230,9 @@ for commit in "$commit_base" "$commit_a" "$commit_b"; do
         if [[ -n "$drivers" ]]; then
             finish INCONCLUSIVE "custom merge driver '$(head -n 1 <<<"$drivers")' in $path is not run by this tool"
         fi
-    done < <(git -C "$repo" ls-tree -r -z --name-only "$commit")
+    done < <(git -C "$repo" ls-tree -r -z --format='%(objectmode) %(path)' "$commit")
 done
-
-if [[ "$source_root" != . ]]; then
-    found=0
-    for commit in "$commit_base" "$commit_a" "$commit_b"; do
-        [[ -n "$(git -C "$repo" ls-tree --name-only "$commit" -- "$source_root")" ]] && found=1
-    done
-    (( found )) || finish ERROR "source root '$source_root' does not exist in either branch"
-fi
+(( root_found )) || finish ERROR "source root '$source_root' does not exist in either branch"
 
 # --- isolated work directory ----------------------------------------------------
 stage workdir
@@ -270,36 +274,55 @@ else
 fi
 
 # --- export the code states ------------------------------------------------------
-# export_state <label> <tree-ish>: extract the tree and write a NUL-delimited
-# list of the Python files under the source root.
-export_state() {
-    local label=$1 oid=$2 dir="$work/snap/$1" path
-    local pathspec=()
-    [[ "$source_root" == . ]] || pathspec=(-- "$source_root")
-    mkdir -p "$dir"
-    tgit archive --format=tar "$oid" | tar -x -m -C "$dir"
-    : > "$work/snap/$label.files"
-    while IFS= read -r -d '' path; do
-        if [[ "$path" == *.py ]]; then
-            printf '%s\0' "$path" >> "$work/snap/$label.files"
+# export_states <label>=<tree-ish>...: extract only the Python files under the
+# source root of every state into snap/<label>/, then write snap/<label>.files,
+# a NUL-delimited list of those files. Profiling showed process start-up
+# dominated this stage, so all states stream through one tar (-i reads the
+# concatenated archives) and the lists come from globbing, not git ls-tree.
+export_states() {
+    local glob=':(glob)**/*.py' pair label path
+    [[ "$source_root" == . ]] || glob=":(glob)$source_root/**/*.py"
+    mkdir -p "$work/snap"
+    for pair in "$@"; do mkdir -p "$work/snap/${pair%%=*}"; done
+    (
+        for pair in "$@"; do
+            label=${pair%%=*}
+            # A state with no Python files makes the pathspec match nothing;
+            # that is an empty snapshot, any other archive failure is fatal.
+            if ! tgit archive --format=tar --prefix="$label/" "${pair#*=}" -- "$glob" 2>"$work/archive-$label.err"; then
+                grep -q 'did not match any files' "$work/archive-$label.err" || exit 1
+            fi
+        done
+    ) | tar -x -i -m -C "$work/snap"
+    shopt -s globstar nullglob dotglob
+    local files=()
+    for pair in "$@"; do
+        label=${pair%%=*}
+        files=()
+        # The archive holds only files matching *.py, so no per-file stat is
+        # needed (a directory named *.py would make the analyser fail: ERROR).
+        for path in "$work/snap/$label"/**/*.py; do
+            files+=("${path#"$work/snap/$label/"}")
+        done
+        if (( ${#files[@]} )); then
+            printf '%s\0' "${files[@]}" > "$work/snap/$label.files"
+        else
+            : > "$work/snap/$label.files"
         fi
-    done < <(tgit ls-tree -r -z --name-only "$oid" "${pathspec[@]}")
-}
-
-state_json() { # <label>
-    printf '{"dir": %s, "files": %s}' \
-        "$(json_str "$(native_path "$work/snap/$1")")" "$(json_str "$(native_path "$work/snap/$1.files")")"
+    done
+    shopt -u globstar nullglob dotglob
 }
 
 states=''
 stage export
 if [[ "$merge_result" == clean ]]; then
-    export_state base "$commit_base"
-    export_state a "$commit_a"
-    export_state b "$commit_b"
-    export_state merged "$merged_tree"
-    states=$(printf '"base": %s, "a": %s, "b": %s, "merged": %s' \
-        "$(state_json base)" "$(state_json a)" "$(state_json b)" "$(state_json merged)")
+    export_states base="$commit_base" a="$commit_a" b="$commit_b" merged="$merged_tree"
+    # One path conversion for all states (each cygpath call is a process).
+    snap=$(json_str "$(native_path "$work/snap")")
+    snap=${snap%\"}
+    for label in base a b merged; do
+        states+="${states:+, }\"$label\": {\"dir\": $snap/$label\", \"files\": $snap/$label.files\"}"
+    done
 fi
 
 # --- analyse --------------------------------------------------------------------

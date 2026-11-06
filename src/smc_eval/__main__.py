@@ -1,6 +1,9 @@
-"""python -m smc_eval evaluate --scenarios <dir> --out <dir> [--split dev|holdout|all] [--no-errors]
+"""Evaluation command line.
 
-Writes <out>/results.json, <out>/cases.csv and <out>/summary.md.
+    python -m smc_eval evaluate --scenarios <dir> --out <dir> [--split dev|holdout|all] [--no-errors]
+        writes <out>/results.json, <out>/cases.csv and <out>/summary.md
+    python -m smc_eval timing --scenarios <dir> --out <dir> [--runs 5]
+        writes <out>/timing.csv, <out>/timing.json and <out>/timing.md
 """
 
 from __future__ import annotations
@@ -121,8 +124,26 @@ def main(argv: list[str] | None = None) -> int:
     ev.add_argument("--out", required=True)
     ev.add_argument("--split", choices=("dev", "holdout", "all"), default="all")
     ev.add_argument("--no-errors", action="store_true", help="skip the error/unsupported inputs")
+    tm = commands.add_parser("timing", help="repeated checker runs with per-stage durations")
+    tm.add_argument("--scenarios", required=True)
+    tm.add_argument("--out", required=True)
+    tm.add_argument("--runs", type=int, default=5)
     args = parser.parse_args(argv)
+    if args.command == "timing":
+        return timing(args)
     return evaluate(args)
+
+
+def timing(args) -> int:
+    from smc_eval import timing as t
+
+    out = Path(args.out)
+    rows = t.time_cases(Path(args.scenarios), out, args.runs)
+    summary = t.summarise(rows)
+    (out / "timing.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    (out / "timing.md").write_text(t.render(summary), encoding="utf-8")
+    print(t.render(summary))
+    return 0
 
 
 if __name__ == "__main__":
