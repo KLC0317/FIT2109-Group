@@ -1,0 +1,19 @@
+# GitLab CI/CD: every push and merge request runs the same setup and tests a
+# marker runs from the README. Uses the unit's shared runner (tag fit2109).
+stages:
+  - test
+
+default:
+  image: python:3.12
+  tags:
+    - fit2109
+
+variables:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+tests:
+  stage: test
+  script:
+    - git --version
+    - bash scripts/setup.sh
+    - bash scripts/test.sh -q
