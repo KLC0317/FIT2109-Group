@@ -47,3 +47,17 @@ under "Output", and the team's changes under "Decision".
 | Decision | **Modified.** Kept the table, corrected (d) to "Premium/Ultimate only", and added the explicit statement that sufficiently targeted tests and linters can catch these failures. Pylint became the existing-tool reference. Two of the seven questions (existing defects, unresolved bindings) became design requirements: exclusions and INCONCLUSIVE. Scope and the observed failures were unchanged. |
 | Residual risk | Our controlled cases may not represent all projects; the evaluation reports this. |
 
+## Activity 2 (Build): bounded Bash error-handling helper
+
+| Field | Entry |
+|---|---|
+| Date | 2026-10-26 |
+| Stage / task | Build: helper for ref validation, safe filenames and work-directory cleanup (`scripts/lib/workdir.sh`) |
+| Owner / checker | M2 / M3; M1 signed off the isolation contract |
+| Tool | GitHub Copilot Chat (University licence) |
+| Instruction | "Write Bash functions (bash 5, set -euo pipefail) for a tool that must never modify the user's repository: 1) resolve a user-supplied ref to a full commit ID safely; 2) normalise a repository-relative source root and reject anything that could escape the repository; 3) create a private temporary directory under a given project-local base; 4) remove that directory and nothing else, even if variables are empty or wrong. Explain the assumptions and every error path." |
+| Output (original) | Four functions with comments. `resolve_ref` used `git rev-parse "$2"` with no `--verify` or `--end-of-options`. `check_root` used a regex rejecting `..`, but with an unquoted expansion. `make_tmp` used `mktemp -d "$base/smc.XXXX"`. `cleanup` ran `rm -rf "$TMP_BASE"/smc.*`, a glob over the whole base, guarded only by `[[ -n $TMP_BASE ]]`. |
+| Verification | M3 reviewed every filesystem and Git mutation, ran `bash -n`, and tested with spaces in paths, refs that look like options (`--all`, `-x`), whitespace in refs, unknown refs, `..`, absolute paths and drive letters, a symlinked work directory, and removal of the base itself or a directory outside it (`tests/integration/test_workdir.py`: 27 passed, 1 skipped where symlinks are not permitted). M3 compared the user's HEAD, index and every file before and after (`tests/integration/test_preservation.py`). |
+| Decision | **Modified.** M2's edits (diff in commit "Add ref, source-root and work-directory helpers"): `--verify --quiet --end-of-options "$ref^{commit}"`, plus refusal of refs starting with `-` or containing whitespace; root normalisation rewritten component by component; template `run.XXXXXX` with `chmod 700`; cleanup rewritten to remove one named directory only after checking it is a real (non-symlink) `run.??????` directory whose physical parent is the expected base. The glob-based `rm -rf` was rejected outright. A test later found a source-root bug in the team's own `tr` call; it was fixed before merge. |
+| Residual risk | Signal timing: SIGTERM cleanup is tested on POSIX only, and a signal between `mktemp` and recording the path could leave an empty `run.*` directory under `out/tmp`, never anything outside it. |
+
