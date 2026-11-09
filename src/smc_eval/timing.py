@@ -5,6 +5,13 @@
 Each run's JSON-lines log gives the per-stage durations. Run 1 for a case
 is recorded as "first" (cold: first run after the fixtures were rebuilt);
 the rest are "repeated".
+
+Following the Week 9 method, the timer covers the whole command a developer
+waits for, every individual run is kept in the CSV, the summary reports the
+median together with the range, and each case's result (status and
+findings) must be identical across runs, so a faster run that changes the
+answer is never counted as an improvement. Profiling is a separate step
+(cprofile_analyser), never switched on while timing.
 """
 
 from __future__ import annotations
@@ -40,6 +47,15 @@ def stage_times(log: Path) -> dict[str, float]:
     return times
 
 
+def result_signature(report: Path) -> str:
+    """The behaviour every run must preserve: status plus findings."""
+    if not report.exists():
+        return "no report"
+    data = json.loads(report.read_text(encoding="utf-8"))
+    findings = sorted(f"{f['rule_id']}:{f['file']}:{f['line']}" for f in data.get("findings", []))
+    return " ".join([data.get("status", "?"), *findings])
+
+
 def time_cases(scenarios: Path, out: Path, runs: int, cases=DEFAULT_CASES) -> list[dict]:
     out.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -61,7 +77,7 @@ def time_cases(scenarios: Path, out: Path, runs: int, cases=DEFAULT_CASES) -> li
             wall = round((time.perf_counter() - start) * 1000, 1)
             stages = stage_times(log)
             row = {"case": case, "run": run, "kind": "first" if run == 1 else "repeated",
-                   "exit": done.returncode, "wall_ms": wall}
+                   "exit": done.returncode, "wall_ms": wall, "result": result_signature(report)}
             row.update({s: stages.get(s, "") for s in STAGES})
             row.update({f"py_{s}": stages.get(f"py_{s}", "") for s in ANALYSER_STAGES})
             rows.append(row)
@@ -81,13 +97,18 @@ def summarise(rows: list[dict]) -> list[dict]:
         stage_medians = {s: statistics.median(float(r[s]) for r in mine if r[s] != "") for s in STAGES
                          if any(r[s] != "" for r in mine)}
         dominant = max(stage_medians, key=stage_medians.get) if stage_medians else ""
+        results = {r["result"] for r in mine}
         summary.append({
             "case": case,
             "runs": len(mine),
             "first_ms": mine[0]["wall_ms"],
             "median_ms": statistics.median(walls),
+            "min_ms": min(walls),
             "max_ms": max(walls),
+            "range_ms": round(max(walls) - min(walls), 1),
             "median_repeated_ms": statistics.median(walls[1:]) if len(walls) > 1 else walls[0],
+            "same_result": len(results) == 1,
+            "result": mine[0]["result"],
             "dominant_stage": dominant,
             "dominant_stage_median_ms": stage_medians.get(dominant, 0),
             "stage_medians_ms": stage_medians,
@@ -96,11 +117,13 @@ def summarise(rows: list[dict]) -> list[dict]:
 
 
 def render(summary: list[dict], target_ms: float = 5000) -> str:
-    lines = ["| Case | Runs | First (ms) | Median (ms) | Max (ms) | Median repeated (ms) | Dominant stage |",
+    lines = ["| Case | Runs | First (ms) | Median (ms) | Range (ms) | Same result every run | Dominant stage |",
              "|---|---|---|---|---|---|---|"]
     for s in summary:
-        lines.append(f"| {s['case']} | {s['runs']} | {s['first_ms']:.0f} | {s['median_ms']:.0f} | {s['max_ms']:.0f} | "
-                     f"{s['median_repeated_ms']:.0f} | {s['dominant_stage']} ({s['dominant_stage_median_ms']:.0f} ms) |")
+        same = "yes" if s["same_result"] else "NO"
+        lines.append(f"| {s['case']} | {s['runs']} | {s['first_ms']:.0f} | {s['median_ms']:.0f} | "
+                     f"{s['min_ms']:.0f}-{s['max_ms']:.0f} ({s['range_ms']:.0f}) | {same} | "
+                     f"{s['dominant_stage']} ({s['dominant_stage_median_ms']:.0f} ms) |")
     latency = next((s for s in summary if s["case"] == "latency100"), None)
     if latency:
         verdict = "met" if latency["median_ms"] < target_ms else "NOT met"
