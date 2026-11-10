@@ -130,3 +130,37 @@ def render(summary: list[dict], target_ms: float = 5000) -> str:
         lines += ["", f"Target: median under {target_ms / 1000:.0f} s on the 100-file fixture: "
                       f"{latency['median_ms'] / 1000:.2f} s ({verdict})."]
     return "\n".join(lines) + "\n"
+
+
+def cprofile_analyser(scenarios: Path, out: Path, case: str = "latency100",
+                      refs: tuple[str, str] = ("latency-api", "latency-caller"), top: int = 15) -> str:
+    """Function profile of the Python analyser on one case (separate from timing).
+
+    The checker runs once with --keep-temp so its manifest survives; the
+    analyser is then re-run on that manifest under cProfile and the top
+    functions by cumulative time are written to <out>/cprofile.txt.
+    """
+    import io
+    import pstats
+    import sys
+
+    from smc_eval.harness import ROOT, _force_remove
+
+    work_out = out / "cprofile-run"
+    _force_remove(work_out)
+    subprocess.run([bash(), CHECKER.as_posix(), "--repo", (scenarios / case).as_posix(), "--out-dir",
+                    work_out.as_posix(), "--quiet", "--keep-temp", *refs], capture_output=True, text=True)
+    kept = sorted((work_out / "tmp").glob("run.*"))
+    if not kept:
+        raise RuntimeError("the checker did not keep its work directory")
+    stats_file = out / "analyser.prof"
+    subprocess.run([sys.executable, "-m", "cProfile", "-o", str(stats_file), "-m", "smc", "analyse",
+                    "--manifest", str(kept[-1] / "manifest.json"), "--quiet"],
+                   env={**os.environ, "PYTHONPATH": str(ROOT / "src"), "PYTHONDONTWRITEBYTECODE": "1"},
+                   capture_output=True, text=True)
+    text = io.StringIO()
+    stats = pstats.Stats(str(stats_file), stream=text)
+    stats.strip_dirs().sort_stats("cumulative").print_stats(top)
+    (out / "cprofile.txt").write_text(text.getvalue(), encoding="utf-8", newline="\n")
+    _force_remove(work_out)
+    return text.getvalue()
