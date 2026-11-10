@@ -61,3 +61,45 @@ under "Output", and the team's changes under "Decision".
 | Decision | **Modified.** M2's edits (diff in commit "Add ref, source-root and work-directory helpers"): `--verify --quiet --end-of-options "$ref^{commit}"`, plus refusal of refs starting with `-` or containing whitespace; root normalisation rewritten component by component; template `run.XXXXXX` with `chmod 700`; cleanup rewritten to remove one named directory only after checking it is a real (non-symlink) `run.??????` directory whose physical parent is the expected base. The glob-based `rm -rf` was rejected outright. A test later found a source-root bug in the team's own `tr` call; it was fixed before merge. |
 | Residual risk | Signal timing: SIGTERM cleanup is tested on POSIX only, and a signal between `mktemp` and recording the path could leave an empty `run.*` directory under `out/tmp`, never anything outside it. |
 
+## Activity 3 (Verify): adversarial test suggestions
+
+| Field | Entry |
+|---|---|
+| Date | 2026-11-04 to 2026-11-05 |
+| Stage / task | Verify: boundary and counterexample cases after the rule contract was fixed |
+| Owner / checker | M3 / M1 |
+| Tool | Gemini (University account) |
+| Instruction | "Here is the contract for a checker that compares a common ancestor, two branches and their merge [rules R1-R3, supported bindings, unsupported list pasted from docs/design.md]. Propose 15 test cases that are likely to expose false positives or false negatives: safe counterexamples and boundary cases for function signatures, import aliases and variable shadowing. For each give the branch edits, the expected checker outcome, the Python feature involved and why it stresses a rule." No fixture, label or holdout case was included. |
+| Output (summary) | 15 suggestions, S01 to S15 (table below). |
+| Verification | M1 ran every suggestion with CPython on base, A, B and the merged code before any expectation was written down, and compared the AI's expected outcome with the behaviour actually observed. |
+| Decision | 9 accepted, 2 modified, 4 rejected; accepted and modified cases are in `tests/unit/test_adversarial.py`. |
+| Residual risk | Suggestions may share the authors' blind spots; they target the documented contract, so gaps in the contract itself are not exercised. |
+
+| ID | Suggestion | AI expected | Observed with CPython / checker | Decision |
+|---|---|---|---|---|
+| S01 | call through `functools.partial(get_user, 1)` | break detected | merged code fails, but indirect calls are outside the binding support | Rejected: out of scope (documented limitation) |
+| S02 | `get_user(1, user_id=2)` where `user_id` is positional-only and `**options` exists | safe | binds in CPython; checker SAFE | Accepted |
+| S03 | default added to a middle parameter, caller passes it by keyword | safe | binds; checker SAFE | Accepted |
+| S04 | `lookup = u.get_user` then `lookup(1)` after a signature change | break detected | merged code fails; assignment bindings are not tracked, so no finding | Modified: kept as a limitation test asserting "not tracked" |
+| S05 | caller imports two different `get_user` | INCONCLUSIVE (ambiguous) | ambiguous binding; checker INCONCLUSIVE | Accepted |
+| S06 | call from a function nested in a method | break detected | fails after merge; checker R2 with scope `Page.render.inner` | Accepted |
+| S07 | `try: from app.users import get_user` / `except ImportError: get_user = None` | INCONCLUSIVE | conditional binding; INCONCLUSIVE | Accepted |
+| S08 | removing a default "is safe for positional callers" | safe | caller omitting the argument raises TypeError after merge; checker R2 | Modified: AI's expectation was wrong; corrected to a break |
+| S09 | lambda default argument capturing the function | break detected | the call goes through a parameter, which is shadowed and untracked | Rejected: out of scope |
+| S10 | keyword-only parameter "can be passed positionally" | safe | TypeError already on the caller branch, so not a merge break | Rejected: incorrect premise |
+| S11 | method with the same name as the changed function | no finding | SAFE | Accepted |
+| S12 | `from . import users` then `users.get_user()` | break detected | R2 | Accepted |
+| S13 | `del get_user` after importing it | unclear | unsupported (`del`); INCONCLUSIVE | Accepted |
+| S14 | duplicate of S03 with different names | safe | (not run) | Rejected: duplicate |
+| S15 | three binder boundaries: `*args` before keyword-only, keyword-only only, positional-only with default | safe | all bind in CPython; SAFE | Accepted |
+
+## Planned versus actual delegation
+
+| Activity | Planned | Actual | Difference |
+|---|---|---|---|
+| 1 | Gemini or Copilot; comparison table checked by M2 | Gemini; one material claim (merged results pipelines tier) was wrong and corrected | none in scope; the output raised two design requirements we had not written down |
+| 2 | draft a helper only; M3 checks; M1 signs off | Copilot draft heavily edited; the AI's cleanup approach rejected | the edit was larger than expected: only the function boundaries survived from the draft |
+| 3 | suggestions only; labels and holdout human-only | as planned; 2 of 15 expected outcomes were wrong | confirms the control: no AI expectation reached a test without being run |
+
+No AI tool was used for the detection rules, fixture labels, smoke
+assertions, holdout cases or evaluation results.
