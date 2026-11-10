@@ -16,4 +16,11 @@ tests:
   script:
     - git --version
     - bash scripts/setup.sh
-    - bash scripts/test.sh -q
+    - bash scripts/test.sh -q --junitxml=out/junit.xml
+  artifacts:
+    when: always
+    expire_in: 2 weeks
+    reports:
+      junit: out/junit.xml
+    paths:
+      - out/junit.xml
