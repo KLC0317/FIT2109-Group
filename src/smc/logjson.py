@@ -24,7 +24,7 @@ class JsonLog:
         if self.path is None:
             return
         record = {
-            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
             "run_id": self.run_id,
             "component": self.component,
             "event": event,
