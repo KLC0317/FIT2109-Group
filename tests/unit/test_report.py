@@ -69,3 +69,35 @@ def test_no_log_path_means_no_file(tmp_path):
     log.event("anything")
     log.close()
     assert list(tmp_path.iterdir()) == []
+
+
+def _analyse_c1_with_log(tmp_path, debug):
+    from smc.rules import analyse
+    from smc.snapshot import Snapshot
+
+    users = "def get_user(user_id):\n    return user_id\n"
+    required = "def get_user(user_id, include_email):\n    return user_id\n"
+    badge = "from app.users import get_user\n\n\ndef badge(u):\n    return get_user(u)\n"
+    snap = lambda label, files: Snapshot.from_sources(label, {"app/__init__.py": "", **files})  # noqa: E731
+    log = JsonLog(tmp_path / "run.jsonl", "r1", debug=debug)
+    analyse(snap("base", {"app/users.py": users}), snap("a", {"app/users.py": required}),
+            snap("b", {"app/users.py": users, "app/badge.py": badge}),
+            snap("merged", {"app/users.py": required, "app/badge.py": badge}), {"a": "api", "b": "caller"})
+    log.close()
+    path = tmp_path / "run.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def test_debug_logs_the_evidence_behind_each_decision(tmp_path):
+    records = _analyse_c1_with_log(tmp_path, debug=True)
+    decision = next(r for r in records if r["event"] == "decision")
+    assert (decision["level"], decision["logger"]) == ("debug", "smc.rules")
+    assert (decision["file"], decision["rule"], decision["outcome"]) == ("app/badge.py", "R2", "finding")
+    assert (decision["caller"], decision["change"]) == ("caller", "api")
+    delta = next(r for r in records if r["event"] == "delta" and r["branch"] == "api")
+    assert delta["functions"] == ["app.users.get_user: signature"]
+
+
+def test_without_debug_no_decision_records(tmp_path):
+    records = _analyse_c1_with_log(tmp_path, debug=False)
+    assert not [r for r in records if r["level"] == "debug"]

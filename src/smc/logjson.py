@@ -4,7 +4,9 @@ Analyser modules log with ``logging.getLogger(__name__)``. JsonLog attaches
 one handler to the ``smc`` logger that appends a JSON object per record to
 the run log. The Bash orchestrator appends to the same file, so one log
 holds the whole run in order. Stage timings and the result are INFO
-records.
+records; with --debug, the evidence behind each decision (branch deltas,
+every incompatible use and why it was reported or excluded, unsupported
+uses) is written as DEBUG records.
 """
 
 from __future__ import annotations
@@ -53,10 +55,10 @@ def log_event(logger: logging.Logger, event: str, level: int = logging.INFO, **f
 class JsonLog:
     """Run log for one analyser invocation (path None: log nothing)."""
 
-    def __init__(self, path: Path | None, run_id: str = ""):
+    def __init__(self, path: Path | None, run_id: str = "", debug: bool = False):
         self.durations: dict[str, float] = {}
         self.logger = logging.getLogger(LOGGER)
-        self.logger.setLevel(logging.INFO)
+        self.logger.setLevel(logging.DEBUG if debug else logging.INFO)
         self.logger.propagate = False
         self.close()
         if path is None:

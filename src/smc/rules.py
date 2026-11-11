@@ -18,9 +18,11 @@ nothing uses are excluded.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from smc import delta as d
+from smc.logjson import log_event
 from smc.resolve import (
     FUNCTION,
     MISSING_ATTR,
@@ -38,6 +40,8 @@ from smc.signature import bind
 from smc.snapshot import Snapshot
 from smc.symbols import ModuleIndex, index_snapshot
 from smc.uses import Use, collect_uses
+
+logger = logging.getLogger(__name__)
 
 RULES = {
     "R1": "removed-function",
@@ -147,6 +151,11 @@ class Analysis:
             for side in SIDES
         }
         self.changed_names = self.deltas["a"].changed_names() | self.deltas["b"].changed_names()
+        for side, delta in self.deltas.items():
+            log_event(logger, "delta", logging.DEBUG, branch=self.refs[side],
+                      functions=sorted(f"{m}.{n}: {c.kind}" for (m, n), c in delta.functions.items()),
+                      removed_modules=sorted(delta.removed_modules),
+                      rebound=sorted(f"{m}.{n}" for m, n in delta.rebound))
 
     def _state(self, label: str, snapshot: Snapshot) -> State:
         state = State(label, snapshot, index_snapshot(snapshot))
@@ -206,10 +215,19 @@ class Analysis:
 
             if result.unsupported:
                 unsupported.append(self._unsupported(use, result))
+                log_event(logger, "unsupported", logging.DEBUG, file=use.path, line=use.lineno,
+                          use=use.source or use.text, reason=result.unsupported,
+                          relevant=unsupported[-1]["relevant"])
                 continue
             if result.problem is None:
                 continue
             finding, why_not = self._attribute(key, use, result.problem)
+            if finding or why_not:  # names unbound everywhere (builtins) are not evidence
+                log_event(logger, "decision", logging.DEBUG, file=use.path, line=use.lineno,
+                          use=use.source or use.text, rule=result.problem.rule, reason=result.problem.reason,
+                          outcome="finding" if finding else "excluded", because=why_not or "",
+                          caller=finding["provenance"]["use"]["ref"] if finding else "",
+                          change=finding["provenance"]["change"]["ref"] if finding else "")
             if finding:
                 findings.append(finding)
             elif why_not:
