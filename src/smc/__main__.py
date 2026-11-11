@@ -67,6 +67,7 @@ def run(manifest_path: Path, quiet: bool = False) -> int:
 
     with log.stage("report"):
         write_report(report, report_path)
+    log.close()  # release the log file before the orchestrator appends to it
     if not quiet:
         print(render(report))
     return EXIT_CODES[report["status"]]

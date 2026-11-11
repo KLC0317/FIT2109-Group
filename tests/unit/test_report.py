@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 import pytest
@@ -38,12 +39,33 @@ def test_log_lines_match_the_orchestrator_format(tmp_path):
     log = JsonLog(tmp_path / "run.jsonl", "r1")
     with log.stage("parse", files=3):
         pass
+    log.close()
     record = json.loads((tmp_path / "run.jsonl").read_text().splitlines()[0])
     assert record["component"] == "analyser" and record["stage"] == "parse" and record["files"] == 3
+    assert record["level"] == "info" and record["logger"] == "smc"
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z", record["ts"])
     assert log.durations["parse"] >= 0
 
 
+def test_module_loggers_reach_the_run_log(tmp_path):
+    log = JsonLog(tmp_path / "run.jsonl", "r1")
+    logging.getLogger("smc.rules").info("plain message %s", 42)
+    log.close()
+    record = json.loads((tmp_path / "run.jsonl").read_text().splitlines()[0])
+    assert (record["logger"], record["event"], record["message"]) == ("smc.rules", "message", "plain message 42")
+
+
+def test_the_log_appends_to_what_the_orchestrator_wrote(tmp_path):
+    path = tmp_path / "run.jsonl"
+    path.write_text('{"component": "orchestrator", "event": "start"}\n')
+    log = JsonLog(path, "r1")
+    log.event("result", status="SAFE")
+    log.close()
+    assert [json.loads(line)["event"] for line in path.read_text().splitlines()] == ["start", "result"]
+
+
 def test_no_log_path_means_no_file(tmp_path):
-    JsonLog(None).event("anything")
+    log = JsonLog(None)
+    log.event("anything")
+    log.close()
     assert list(tmp_path.iterdir()) == []
