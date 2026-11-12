@@ -8,6 +8,7 @@ work, and the temporary work directory must be gone.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -146,3 +147,14 @@ def test_sigterm_cleans_up(repo, tmp_path):
     assert proc.wait(timeout=30) == 143
     assert leftover_workdirs(out) == []
     assert fingerprint(repo.path) == before
+
+
+def test_debug_log_records_each_decision(repo, tmp_path):
+    log = tmp_path / "run.jsonl"
+    code, report, _ = run_checker(repo.path, "api", "caller", args=("--debug", "--log", posix(log)),
+                                  out_dir=tmp_path / "out")
+    assert code == 1
+    records = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    decisions = [r for r in records if r.get("event") == "decision"]
+    assert [(d["file"], d["outcome"]) for d in decisions] == [("app/badge.py", "finding")]
+    assert {r["component"] for r in records} == {"orchestrator", "analyser"}

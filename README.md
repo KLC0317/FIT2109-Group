@@ -66,6 +66,7 @@ bash scripts/silent-merge-check.sh --repo <repo> [--source-root <dir>] <ref-a> <
 | `--out-dir` | where reports, logs and the temporary merge go (default `out/`) |
 | `--json`, `--log` | explicit report and log paths |
 | `--quiet` | no diagnostics on stdout; the exit code and report still say everything |
+| `--debug` | also log, at DEBUG level, the evidence behind each decision (branch changes, every finding and exclusion, unsupported uses) |
 | `--keep-temp` | keep the temporary merge directory for inspection |
 
 Exit codes: **0** SAFE, **1** SILENT BREAK, **2** TEXT CONFLICT, **3**
