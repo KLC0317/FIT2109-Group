@@ -35,7 +35,7 @@ fixtures also contain a defect already present on the base commit
 | At least 5/6 holdout breaks detected | 6/6 | met |
 | Zero false alarms among the 8 safe holdout cases | 0/8 | met |
 | All 4 holdout text conflicts identified | 4/4 | met |
-| Median under 5 s on the 100-file fixture | 5.29 s on the laptop; unit server pending | see Latency |
+| Median under 5 s on the 100-file fixture | 3.79 s on the laptop (range 3.61-3.92 s); unit server pending | see Latency |
 
 ### Holdout (18 pairs)
 
@@ -115,23 +115,45 @@ are in what a reviewer has to do with its output:
 
 ## Latency
 
-Five runs per case; run 1 is the first run after the fixtures were rebuilt.
+Method (the Week 9 profiling method): the timer covers the whole
+`silent-merge-check.sh` command, from start to report written, because
+that is what the developer waits for. Each case runs five times with the
+profiler off. Every run is kept in `timing.csv`, and the summary gives the
+median and the range. Every run of a case must produce the same status and
+findings. A function profile (`cProfile`) is taken separately, after
+timing, to locate cost inside the analyser.
 
-| Case | First (ms) | Median (ms) | Max (ms) | Dominant stage |
-|---|---|---|---|---|
-| latency100 (100 files, 1 R2 break) | 5570 | 5289 | 6362 | export (1712 ms) |
-| c05 (MiniApp R2 break) | 3788 | 3650 | 3788 | export (880 ms) |
-| c13 (MiniApp safe) | 3607 | 3608 | 3692 | export (849 ms) |
-| c25 (MiniApp conflict) | 3064 | 3062 | 3117 | validate (543 ms) |
+Five runs per case on 12 Nov; run 1 is the first run after the fixtures
+were rebuilt.
+
+| Case | First (ms) | Median (ms) | Range (ms) | Same result every run | Dominant stage |
+|---|---|---|---|---|---|
+| latency100 (100 files, 1 R2 break) | 3923 | 3794 | 3606-3923 | yes | export (1257 ms) |
+| c05 (MiniApp R2 break) | 2833 | 2845 | 2771-2899 | yes | export (687 ms) |
+| c13 (MiniApp safe) | 2755 | 2725 | 2704-2791 | yes | export (640 ms) |
+| c25 (MiniApp conflict) | 2367 | 2321 | 2261-2786 | yes | validate (409 ms) |
 
 The first measurement put latency100 at a 6.65 s median, with export
 dominating every clean-merge case. Most of that time was process start-up:
 one `git archive`, `tar` and `ls-tree` per state, a forked `date` per log
 line, and a `cygpath` per path. Exporting only `*.py`, streaming all four
 states through one `tar`, building file lists with `globstar` and using
-bash builtins for timestamps brought the median to 5.29 s (c05: 5.48 s to
-3.65 s). The analyser itself takes about 0.1 s of analysis plus 0.5 s of
-parsing on 400 files.
+bash builtins for timestamps brought the median to 5.29 s on 6 Nov (c05:
+5.48 s to 3.65 s).
+
+The 12 Nov measurement of the same code gives 3.79 s. The difference
+between two sessions on the same laptop (5.29 s against 3.79 s) is larger
+than the margin to the target. One session's number therefore cannot
+establish the target, which is why ranges are reported and why the
+unit-server measurement decides.
+
+`cProfile` on the latency100 manifest (`out/eval/timing/cprofile.txt`)
+puts the whole analyser at about 0.5 s with the profiler's overhead, about
+a seventh of the run. The cost splits between collecting uses with scopes
+(`uses.collect`, 0.15 s cumulative) and indexing module bindings
+(`symbols.index_snapshot`, 0.14 s). No single function dominates, so the
+remaining time is in the orchestrator's process start-ups (export, merge),
+not in the analysis.
 
 The proposal's target is defined on the unit server. Process creation under
 Git Bash on Windows is much slower than on Linux, so the laptop figure is an
