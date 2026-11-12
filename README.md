@@ -137,6 +137,14 @@ scenario/         MiniApp, 30 labelled branch-pair fixtures, holdout lock
 docs/             scenario, design, evaluation, AI use, meetings, risks
 ```
 
+## Continuous integration
+
+`.gitlab-ci.yml` runs `scripts/setup.sh` and `scripts/test.sh` in a
+`python:3.12` container on the unit's shared runner (tag `fit2109`) for every
+push and merge request. The pytest results are kept as a JUnit artifact, so
+a failing test shows up in the merge request. A merge request is only
+merged when its pipeline is green.
+
 ## Documentation
 
 * [docs/scenario.md](docs/scenario.md): user, pain point, MiniApp, fixture catalogue, label review
