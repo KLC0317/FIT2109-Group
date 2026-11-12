@@ -3,7 +3,7 @@
 # incompatibilities that a clean Git merge would hide.
 #
 # Usage: bash scripts/silent-merge-check.sh --repo <repo> [--source-root <dir>]
-#            [--out-dir <dir>] [--json <file>] [--log <file>] [--keep-temp] [--quiet]
+#            [--out-dir <dir>] [--json <file>] [--log <file>] [--keep-temp] [--quiet] [--debug]
 #            <ref-a> <ref-b>
 #
 # Exit codes: 0 SAFE, 1 SILENT BREAK, 2 TEXT CONFLICT, 3 INCONCLUSIVE/ERROR.
@@ -37,7 +37,7 @@ usage() {
     sed -n '2,9s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
 }
 
-repo='' source_root='.' out_dir="$ROOT/out" report='' log_file='' keep_temp=0 quiet=0
+repo='' source_root='.' out_dir="$ROOT/out" report='' log_file='' keep_temp=0 quiet=0 debug=false
 refs=()
 need_value() { # <option> <remaining-arg-count>
     (( $2 >= 2 )) || { printf 'error: %s needs a value\n' "$1" >&2; leave $EXIT_ERROR; }
@@ -51,6 +51,7 @@ while (( $# > 0 )); do
         --log) need_value "$1" $#; log_file=$2; shift 2 ;;
         --keep-temp) keep_temp=1; shift ;;
         --quiet) quiet=1; shift ;;
+        --debug) debug=true; shift ;;
         -h|--help) usage; leave 0 ;;
         --) shift; refs+=("$@"); break ;;
         -*) usage >&2; printf 'error: unknown option: %s\n' "$1" >&2; leave $EXIT_ERROR ;;
@@ -341,7 +342,8 @@ cat > "$manifest" <<JSON
   "states": {$states},
   "notes": [$note_json],
   "report": $(json_str "$(native_path "$report")"),
-  "log": $(json_str "$(native_path "$log_file")")
+  "log": $(json_str "$(native_path "$log_file")"),
+  "debug": $debug
 }
 JSON
 

@@ -1,6 +1,6 @@
 """Analyser entry point, called by scripts/silent-merge-check.sh.
 
-    python -m smc analyse --manifest <manifest.json> [--quiet]
+    python -m smc analyse --manifest <manifest.json> [--quiet] [--debug]
 
 The manifest is written by the Bash orchestrator. It names the exported
 directory and a NUL-delimited file list for each code state (base, a, b and,
@@ -28,9 +28,10 @@ def read_list(path: Path) -> list[str]:
     return [item for item in data.split("\0") if item]
 
 
-def run(manifest_path: Path, quiet: bool = False) -> int:
+def run(manifest_path: Path, quiet: bool = False, debug: bool = False) -> int:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    log = JsonLog(Path(manifest["log"]) if manifest.get("log") else None, manifest.get("run_id", ""))
+    log = JsonLog(Path(manifest["log"]) if manifest.get("log") else None, manifest.get("run_id", ""),
+                  debug=debug or bool(manifest.get("debug")))
     report_path = Path(manifest["report"])
     merge = manifest["merge"]
 
@@ -67,6 +68,7 @@ def run(manifest_path: Path, quiet: bool = False) -> int:
 
     with log.stage("report"):
         write_report(report, report_path)
+    log.close()  # release the log file before the orchestrator appends to it
     if not quiet:
         print(render(report))
     return EXIT_CODES[report["status"]]
@@ -78,9 +80,10 @@ def main(argv: list[str] | None = None) -> int:
     analyse_cmd = commands.add_parser("analyse", help="analyse the states named in a manifest")
     analyse_cmd.add_argument("--manifest", type=Path, required=True)
     analyse_cmd.add_argument("--quiet", action="store_true")
+    analyse_cmd.add_argument("--debug", action="store_true", help="log the evidence behind each decision")
     args = parser.parse_args(argv)
     try:
-        return run(args.manifest, args.quiet)
+        return run(args.manifest, args.quiet, args.debug)
     except Exception as exc:  # reported as ERROR, never as SAFE
         print(f"error: analyser failed: {exc.__class__.__name__}: {exc}", file=sys.stderr)
         return EXIT_CODES["ERROR"]
