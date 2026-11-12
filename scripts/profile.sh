@@ -5,7 +5,9 @@
 #
 # Builds the 100-file fixture (make-fixtures.sh --latency) and the c05, c13
 # and c25 pairs, then writes out/eval/timing/timing.csv (one row per run,
-# first run marked), timing.json and timing.md (median, max, dominant stage).
+# first run marked), timing.json and timing.md (median, range, same result
+# on every run, dominant stage). Then, with timing finished, profiles the
+# Python analyser on latency100 with cProfile (out/eval/timing/cprofile.txt).
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -23,4 +25,4 @@ if [[ -z "${SMC_BASH:-}" ]] && command -v cygpath >/dev/null 2>&1; then
 fi
 rm -rf -- "$ROOT/out/eval/timing"
 PYTHONPATH="$(native_path "$ROOT/src")" "$PY" -m smc_eval timing --runs "$runs" \
-    --scenarios "$(native_path "$ROOT/out/scenarios")" --out "$(native_path "$ROOT/out/eval/timing")"
+    --scenarios "$(native_path "$ROOT/out/scenarios")" --out "$(native_path "$ROOT/out/eval/timing")" --cprofile

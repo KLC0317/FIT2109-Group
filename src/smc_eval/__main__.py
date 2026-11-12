@@ -128,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     tm.add_argument("--scenarios", required=True)
     tm.add_argument("--out", required=True)
     tm.add_argument("--runs", type=int, default=5)
+    tm.add_argument("--cprofile", action="store_true",
+                    help="afterwards, profile the analyser on latency100 with cProfile")
     args = parser.parse_args(argv)
     if args.command == "timing":
         return timing(args)
@@ -143,7 +145,10 @@ def timing(args) -> int:
     (out / "timing.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     (out / "timing.md").write_text(t.render(summary), encoding="utf-8")
     print(t.render(summary))
-    return 0
+    if args.cprofile:
+        print("cProfile of the analyser on latency100 (cumulative time):")
+        print(t.cprofile_analyser(Path(args.scenarios), out))
+    return 0 if all(s["same_result"] for s in summary) else 1
 
 
 if __name__ == "__main__":
