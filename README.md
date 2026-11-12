@@ -50,7 +50,7 @@ safe-optional-email + safe-badge             safe      merge looks fine   SAFE (
 conflict-team-field + conflict-email-field   conflict  conflict reported  TEXT CONFLICT (exit 2)
 ```
 
-`test.sh` ends with `260 passed, 2 skipped`. One test needs POSIX signals
+`test.sh` ends with `269 passed, 2 skipped`. One test needs POSIX signals
 and one needs permission to create symlinks; on Linux both run.
 
 ## Using the checker
@@ -121,6 +121,7 @@ kind of run.
 | `scripts/freeze-holdout.sh` | writes or checks `scenario/holdout.lock` |
 | `scripts/evaluate.sh` | baseline, Pylint and the checker on the labelled pairs plus 14 error inputs (`out/eval/`) |
 | `scripts/profile.sh` | five timed runs per case, per-stage durations (`out/eval/timing/`) |
+| `scripts/check-archive.sh` | setup (with `--setup`), demo and full tests from a fresh `git archive` of HEAD |
 
 ## Layout
 
