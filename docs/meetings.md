@@ -61,3 +61,17 @@ camera; at most 5 minutes).
 **Thu 12 Nov.** Clean-archive check run (scripts/check-archive.sh): setup,
 demo and full test suite from `git archive HEAD` in an empty directory.
 Release tagged.
+
+**Thu 12 Nov (evening).** Merged the week-14 follow-ups that had waited
+for review: the Week 9 profiling method (ranges, same-result check,
+`cProfile`; MR !24), the GitLab CI pipeline once the `fit2109` runner tag
+was confirmed (MR !25), and the analyser log on Python's `logging` module
+with `--debug` evidence (MR !26). Full suite green on `main` (274 passed).
+*Decision:* add an Evaluate-stage AI activity (clean-archive reproduction,
+M2 owner, M1 checker) with `AGENTS.md` written first. It is recorded as
+unplanned in docs/ai-use.md.
+
+**Fri 13 Nov.** Activity 4 merged (MR !27): five README fixes accepted,
+two suggestions rejected. Line endings normalised. Final tag `v1.1.0` for
+submission; the project archive is built with
+`git archive --format=zip -o project.zip v1.1.0`.

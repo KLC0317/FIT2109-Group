@@ -109,11 +109,36 @@ and submodules.
   exit 1 (SILENT BREAK). The final exit code is taken from the analyser's
   report, and a mismatch with the analyser's own exit status is an ERROR.
 
+## Bash and the chosen FIT2109 techniques
+
+The proposal (Section 4) names Bash's role and two techniques. Each one
+does real work in the tool, and each follows what the unit taught.
+
+| Part | Role in the tool | Unit practice it follows |
+|---|---|---|
+| Bash (core workflow) | validates refs and the source root, selects the merge base, runs preflight checks, merges in an isolated repository, classifies text conflicts from unmerged index entries, exports the four states, writes the manifest, maps the analyser's report to exit codes, cleans up | Weeks 1-2 and 7: `set -euo pipefail`, quoted expansions, usage and errors on stderr with non-zero exits, NUL-delimited file lists, here-documents, traps for cleanup; Week 2's ShellCheck runs in `scripts/test.sh` when installed |
+| Technique 1: automated testing | pytest parameterisation over every rule, binding boundary and safe counterexample; real Git integration tests, including byte-for-byte repository preservation after success, conflicts and errors; `scripts/test.sh` runs them all | Week 11: one test command used locally and by the GitLab pipeline (`.gitlab-ci.yml`, `python:3.12` on the `fit2109` runner, JUnit artifact) |
+| Technique 2: logging and profiling | JSON-lines run log with resolved commits, coverage, findings and stage durations; `--debug` adds the evidence behind each decision; a timing harness turns repeated runs into a CSV and names the dominant stage | Week 8: Python's `logging` module with `getLogger(__name__)`, and targeted log records where a pipeline cannot be paused in a debugger. Week 9: a baseline with the profiler off, timing that covers the whole command, every run kept, median with range, the same output required, then `cProfile` to locate cost |
+
+Supporting practice, not counted as techniques: Weeks 4-5 Git workflow
+(task branches, reviewed merge requests, `main` kept runnable) and Week 6
+reproducible environments (Python 3.12 venv, every dependency pinned in
+`requirements.txt`, the non-Docker route).
+
 ## Logging and profiling
 
 Every run appends JSON lines to `out/logs/<run>.jsonl`. The orchestrator
 logs `start`, one `stage` record per stage with `duration_ms`, and
-`result`; the analyser adds `parse`, `analyse` and `report`.
-`python -m smc_eval timing` turns repeated runs into a CSV and names the
-dominant stage. That is how export was found to dominate and was then cut
-down (see docs/evaluation.md).
+`result`. The analyser logs through Python's `logging` module: a
+`FileHandler` with a JSON-lines formatter on the `smc` logger, so records
+from any `logging.getLogger(__name__)` land in the same file. The analyser
+adds `parse`, `analyse` and `report` at INFO. With `--debug`, `smc.rules`
+also logs each branch's delta and every finding or exclusion with its
+reason.
+
+`python -m smc_eval timing` (`scripts/profile.sh`) runs each case five
+times with no profiler attached, keeps every run in a CSV, reports the
+median and range, and fails if any case's result differs between runs.
+Only then does it profile the analyser with `cProfile`. That is how export
+was found to dominate and was then cut down, and how the analyser itself
+was shown to be a small share of a run (see docs/evaluation.md).
