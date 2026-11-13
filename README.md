@@ -19,20 +19,25 @@ FIT2109 group project, team MY-T06-03 ("You're Absolutely Right!").
 
 Requirements: Bash, Git 2.38 or newer, Python 3.12. No Docker, no network
 access after setup, no fixed ports and no privileged operations. Everything
-generated stays under `out/`.
+generated stays under `out/`; `rm -rf out .venv` returns the project to a
+clean extraction.
 
 ```bash
-bash scripts/setup.sh      # .venv with pinned pytest and pylint
-bash scripts/demo.sh       # baseline versus checker on the MiniApp scenario
-bash scripts/test.sh       # bash -n, unit tests and Git integration tests
+bash scripts/setup.sh      # .venv with pinned pytest and pylint (about 1 minute)
+bash scripts/demo.sh       # baseline versus checker on the MiniApp scenario (about 1 minute)
+bash scripts/test.sh       # bash -n, unit tests and Git integration tests (2-3 minutes)
 ```
 
-`setup.sh` ends with:
+`setup.sh` looks for `python3.12`, then `python3`, then `python`, and
+uses the first one that is Python 3.12. If none is, it stops and says so;
+point it at an interpreter with `SMC_PYTHON=/path/to/python3.12 bash
+scripts/setup.sh`. Setup is the only step that needs network access (to
+install `requirements.txt`). It ends with:
 
 ```
 bash:   5.x
 git:    2.4x
-python: Python 3.12.x (.../.venv/bin/python)
+python: Python 3.12.x (.../.venv/bin/python; .venv/Scripts/python.exe under Git Bash on Windows)
 pytest: pytest 8.2.0
 pylint: pylint 4.1.2
 setup complete
@@ -50,8 +55,10 @@ safe-optional-email + safe-badge             safe      merge looks fine   SAFE (
 conflict-team-field + conflict-email-field   conflict  conflict reported  TEXT CONFLICT (exit 2)
 ```
 
-`test.sh` ends with `269 passed, 2 skipped`. One test needs POSIX signals
-and one needs permission to create symlinks; on Linux both run.
+`test.sh` ends with `274 passed, 2 skipped` under Git Bash on Windows. The
+two skipped tests need POSIX signals and permission to create symlinks;
+on Linux they run as well, giving 276 tests. (The signal test still skips
+itself if the run finishes before the signal can be sent.)
 
 ## Using the checker
 
