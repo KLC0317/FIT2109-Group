@@ -13,7 +13,8 @@ proposal itself and is not one of the three activities below.
 ## Plan
 
 Each member drafted and owns one activity and checks another member's. The
-three activities cover the Discover, Build and Verify stages. Tools are
+three planned activities cover the Discover, Build and Verify stages; a fourth,
+for the Evaluate stage, was added in week 14 (below). Tools are
 University-supported assistants (Gemini or Copilot).
 
 | Activity | Stage | Owner | Independent checker | Allowed | Not allowed |
@@ -21,6 +22,7 @@ University-supported assistants (Gemini or Copilot).
 | 1. Study existing tools | Discover, weeks 11-12 | M1 | M2 | compare existing approaches against the three reproduced failures; challenge scope and baseline | inventing team observations, choosing the problem, deciding feasibility |
 | 2. Bounded Bash error-handling helper | Build, week 12 | M2 | M3 (M1 signs off isolation) | draft one helper: ref validation, safe filenames, cleanup of the project-local work directory | the merge engine, isolation design, exit-code meaning, touching the live repository |
 | 3. Adversarial test suggestions | Verify, weeks 12-13 | M3 | M1 | propose safe counterexamples and boundary cases for signatures, aliases, shadowing | setting ground truth, labelling fixtures, seeing holdout cases, fabricating results |
+| 4. Clean-archive reproduction review (added in week 14, not in the proposal) | Evaluate, week 14 | M2 | M1 | run setup, demo and tests from a `git archive` copy by following only the README, under `AGENTS.md` and the `reproduce-from-archive` skill; list README problems | editing any tracked file, pushing, reading holdout fixtures, deciding which README changes to make |
 
 **Never delegated:** the three detection rules (the core logic), fixture
 labels and smoke assertions, holdout cases, and evaluation results. Errors
@@ -93,6 +95,29 @@ under "Output", and the team's changes under "Decision".
 | S14 | duplicate of S03 with different names | safe | (not run) | Rejected: duplicate |
 | S15 | three binder boundaries: `*args` before keyword-only, keyword-only only, positional-only with default | safe | all bind in CPython; SAFE | Accepted |
 
+## Activity 4 (Evaluate): clean-archive reproduction review
+
+Not in the proposal's plan. Added in week 14 after the week 12 workshop on
+agentic tools: reproducing the project as a marker would is repetitive,
+mechanical and easy to check, and a fresh reader does not share our
+assumptions about the README. Because the assistant would run commands,
+not just answer, the boundaries were written down first: `AGENTS.md`
+(project facts and no-touch rules) and a reusable skill
+(`.github/skills/reproduce-from-archive/SKILL.md`).
+
+| Field | Entry |
+|---|---|
+| Date | 2026-11-12 to 2026-11-13 |
+| Stage / task | Evaluate: check that someone else can reproduce the project from the README before submission |
+| Owner / checker | M2 / M1 |
+| Tool | GitHub Copilot agent mode in VS Code (University licence), reading `AGENTS.md`; the skill text was given in the request |
+| Permissions | allowed: read the repository, create and use a scratch copy under `out/`, run `scripts/*.sh` there. Denied: edit tracked files, any `git` command that writes to the real repository, push, read holdout fixtures. Running commands needed M2's approval in the agent UI each time. |
+| Instruction | "Follow the reproduce-from-archive skill below on the current main. Export it with git archive into a new directory under out/ and follow only README.md in a fresh shell. For each command report the exit status, the time taken and whether the output matches what the README says. Classify each problem as blocking, misleading or missing, include the counterexample check, and propose README edits as a list. Do not change any file." |
+| Output (summary) | All steps passed (setup, demo, 274 passed and 2 skipped; about 3 minutes in total). Seven points: (1) the README's test count (269) is stale; (2) no expected durations; (3) the README does not say how Python 3.12 is found or what to do if it is missing; (4) the expected setup output shows `.venv/bin/python`, but Git Bash on Windows prints `.venv/Scripts/python.exe`; (5) nothing says how to return to a clean state; (6) suggests a Makefile wrapping the three scripts; (7) suggests the demo reuse previously built fixtures to save time. The counterexample check: with no Python 3.12 on PATH, setup stops with "Python 3.12 not found (set SMC_PYTHON to its path)". |
+| Verification | M1 re-ran every point by hand from a fresh `git archive` (`bash scripts/check-archive.sh --setup`, main at `28250a2`): the stale count (274, not 269), the Windows path, the missing reset instruction and the Python lookup order were all reproduced; durations were timed (setup under 1 minute, demo about 1 minute, tests 2-3 minutes). The counterexample was repeated with `PATH` stripped of Python. M1 also checked that the agent had changed no tracked file (`git status` clean in the real repository). |
+| Decision | **Modified.** Points 1-5 accepted and written by M2 (commit "README: fixes from the clean-archive reproduction"). For point 4 we added the Windows path as a note instead of switching the example, because markers run on Linux. Point 6 rejected: the spec asks for `scripts/demo.sh` and `scripts/test.sh`, and a Makefile adds a tool without removing a step. Point 7 rejected: the demo must run end to end from a clean extraction, so rebuilding the fixtures is the point. |
+| Residual risk | The reproduction ran on a Windows laptop. The unit server (Linux, the markers' environment) still needs the same run, which is on the week-14 checklist. An agent that knows the codebase may also fill gaps a human marker would not, so we only accepted points M1 could reproduce without that knowledge. |
+
 ## Planned versus actual delegation
 
 | Activity | Planned | Actual | Difference |
@@ -100,6 +125,16 @@ under "Output", and the team's changes under "Decision".
 | 1 | Gemini or Copilot; comparison table checked by M2 | Gemini; one material claim (merged results pipelines tier) was wrong and corrected | none in scope; the output raised two design requirements we had not written down |
 | 2 | draft a helper only; M3 checks; M1 signs off | Copilot draft heavily edited; the AI's cleanup approach rejected | the edit was larger than expected: only the function boundaries survived from the draft |
 | 3 | suggestions only; labels and holdout human-only | as planned; 2 of 15 expected outcomes were wrong | confirms the control: no AI expectation reached a test without being run |
+| 4 | not planned | added in week 14 for the Evaluate stage, with written instructions and a permission boundary before use | the plan had no Evaluate-stage activity; giving an agent the power to run commands needed `AGENTS.md`, per-command approval and a check that nothing was modified, which a chat-only activity did not |
+
+**Lessons.** Checks were cheapest where they could be run rather than
+read: CPython for test expectations (activity 3), a byte-for-byte
+repository comparison for the helper (activity 2), and a second clean
+reproduction (activity 4). Written boundaries (`AGENTS.md`, the "never
+delegated" list) did more to keep AI away from the core logic than
+reminders during a session. Next time we would put the Evaluate-stage
+activity in the plan from the start, because reproducing the project
+exposed stale documentation that every member had read past.
 
 No AI tool was used for the detection rules, fixture labels, smoke
 assertions, holdout cases or evaluation results.
