@@ -1,0 +1,5 @@
+# Keep LF line endings in the repository whatever the editor or OS (risk K11).
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.pdf binary
